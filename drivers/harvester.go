@@ -11,11 +11,12 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
-	"github.com/rancher/machine/libmachine/drivers"
-	"github.com/rancher/machine/libmachine/log"
-	"github.com/rancher/machine/libmachine/mcnflag"
-	"github.com/rancher/machine/libmachine/state"
+	"github.com/docker/machine/libmachine/drivers"
+	"github.com/docker/machine/libmachine/log"
+	"github.com/docker/machine/libmachine/mcnflag"
+	"github.com/docker/machine/libmachine/state"
 	regen "github.com/zach-klippenstein/goregen"
 	restclient "k8s.io/client-go/rest"
 	v1 "kubevirt.io/client-go/api/v1"
@@ -250,12 +251,12 @@ func newTrue() *bool {
 // PreCreateCheck validates if driver values are valid to create the machine.
 func (d *Driver) PreCreateCheck() (err error) {
 
-	c, err := d.getHarvesterClient()
+	// c, err := d.getHarvesterClient()
 
-	existingVM, err := c.VirtualMachine(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
-	if existingVM != nil {
-		return fmt.Errorf("Virtual Machine with name %s already exists", existingVM.Name)
-	}
+	// existingVM, err := c.VirtualMachine(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+	// if err != nil {
+	// 	return fmt.Errorf("Virtual Machine with name %s already exists", existingVM.Name)
+	// }
 
 	return nil
 }
@@ -433,6 +434,39 @@ func (d *Driver) Create() error {
 	println("Creating Virtual Machine ...")
 	d.vm, err = virtClient.VirtualMachine(d.namespace).Create(ubuntuVM)
 
+	sshSvc := &apiv1.Service{
+		ObjectMeta: k8smetav1.ObjectMeta{
+			Name:      d.vmName,
+			Namespace: d.namespace,
+			Labels:    d.vm.Labels,
+		},
+		Spec: apiv1.ServiceSpec{
+			Ports: []apiv1.ServicePort{
+				{
+					Name: "ssh",
+					Port: 22,
+					TargetPort: intstr.IntOrString{
+						IntVal: 22,
+					},
+				},
+			},
+			Selector: d.vmLabels,
+			Type:     apiv1.ServiceTypeNodePort,
+		},
+	}
+
+	createdSvc, err := virtClient.Core().Services(d.namespace).Create(sshSvc)
+	// nodePort := createdSvc.Spec.Ports[0].NodePort
+	if len(createdSvc.Spec.Ports) != 0 {
+		d.SSHPort = int(createdSvc.Spec.Ports[0].NodePort)
+	}
+
+	sshHost, _ := d.GetSSHHostname()
+	sshPort, _ := d.GetSSHPort()
+
+	println("SSH Host: ", sshHost)
+	println("SSH Port:", sshPort)
+
 	if err != nil {
 		println(err.Error())
 	} else {
@@ -488,27 +522,49 @@ func (d *Driver) GetIP() (string, error) {
 
 // GetSSHHostname returns an IP address or hostname for the machine instance.
 func (d *Driver) GetSSHHostname() (string, error) {
+
+	podNetwork := *&d.vm.Spec.Template.Spec.Networks[0].Pod
+	if podNetwork != nil {
+		return d.GetHostIP()
+	}
 	return d.GetIP()
+
+}
+
+// GetHostIP gets the IP of the Host on which the machine is running
+func (d *Driver) GetHostIP() (string, error) {
+
+	c, err := d.getHarvesterClient()
+	podSelector := fmt.Sprint("harvester.cattle.io/vmName=", d.vmLabels["harvester.cattle.io/vmName"])
+	println("PodSelector to use: " + podSelector)
+	podList, err := c.Core().Pods(d.namespace).List(k8smetav1.ListOptions{
+		LabelSelector: podSelector,
+	})
+
+	if err != nil || len(podList.Items) == 0 {
+		return "", fmt.Errorf("No VM is scheduled on the cluster")
+	}
+	return podList.Items[0].Status.HostIP, nil
 }
 
 // GetSSHUsername returns an IP address or hostname for the machine instance.
-func (d *Driver) GetSSHUsername() (string, error) {
+func (d *Driver) GetSSHUsername() string {
 	if d.SSHUser != "" {
-		return d.SSHUser, nil
+		return d.SSHUser
 	}
-	return "", fmt.Errorf("No SSHUser defined")
+	return ""
 }
 
 // GetSSHPort returns an IP address or hostname for the machine instance.
-func (d *Driver) GetSSHPort() (string, error) {
+func (d *Driver) GetSSHPort() (int, error) {
 	if d.SSHPort != 0 {
-		return fmt.Sprint(d.SSHPort), nil
+		return d.SSHPort, nil
 	}
-	return "", fmt.Errorf("No SSH Port defined")
+	return 0, fmt.Errorf("No SSH Port defined")
 }
 
 // GetSSHKeyPath return the SSH Key Path
-func GetSSHKeyPath() string {
+func (d *Driver) GetSSHKeyPath() string {
 	return "~/.ssh/MacOSsKey.pem"
 }
 
@@ -648,3 +704,42 @@ func (d *Driver) Kill() error {
 	_, err = c.VirtualMachine(d.namespace).Update(vm)
 	return err
 }
+
+// func main() {
+
+// 	d := NewDriver("", "")
+// 	d.caCertBase64 = defaultCaCertBase64
+// 	d.certBase64 = defaultCertBase64
+// 	d.diskSize = defaultDiskSize
+// 	d.harvesterHost = defaultHarvesterHost
+// 	d.keyBase64 = defaultKeyBase64
+// 	d.memSize = defaultMemSize
+// 	d.namespace = defaultNamespace
+// 	d.nbCPUCores = defaultNbCPUCores
+// 	d.sshKeyName = defaultSSHKeyName
+// 	d.vmDescription = defaultVMDescription
+// 	d.vmImageID = defaultVMImageID
+// 	d.vmName = defaultVMName
+// 	d.vmLabels = map[string]string{
+// 		"harvester.cattle.io/creator": "harvester",
+// 	}
+// 	d.vmLabels["harvester.cattle.io/vmName"] = d.vmName
+
+// 	// d.Create()
+// 	c, _ := d.getHarvesterClient()
+// 	d.vm, _ = c.VirtualMachine(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+// 	svc, _ := c.Core().Services(d.namespace).Get(d.vmName, k8smetav1.GetOptions{})
+// 	sshPort := svc.Spec.Ports[0].NodePort
+// 	vmState, _ := d.GetState()
+// 	for vmState != state.Running {
+// 		println("VM is not yet running, waiting another 10 seconds...")
+// 		time.Sleep(10 * time.Second)
+// 		vmState, _ = d.GetState()
+// 	}
+// 	println("VM Created, Getting SSH information")
+// 	sshHost, _ := d.GetSSHHostname()
+
+// 	// sshPort, _ := d.GetSSHPort()
+// 	fmt.Printf("SSH PORT: %d\nSSH HOST: %s\nSSH User: %s\nSSH Keypath: %s\n", sshPort, sshHost, d.GetSSHUsername(), d.GetSSHKeyPath())
+// 	println("PodNetworkCIDR for VM: ", *&d.vm.Spec.Template.Spec.Networks[0].Pod)
+// }
