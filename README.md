@@ -1,20 +1,10 @@
-# listvms
+# Harvester Driver for Docker Machine
 
-List all VMs and VMIs objects in KubeVirt
+This repository is a Harvester Driver for Docker Machine. It uses the Kubernetes API underlying Harvester (since Harvester does not yet an official API) in order manage VM lifecycle.
 
-## How to build
-```
-$ export GO111MODULE=on
-$ go build
-```
-## How to test this example
-first you need to export an environment variable `KUBECONFIG` pointing to your kubernetes config, where KubeVirt is installed.
+The Create() operation will create an Object VirtualMachine with some labels for Harvester.
 
-```
-$ export KUBECONFIG=/home/<user>/.kubeconfig
-$ ./listvms
-Type                       Name          Namespace     Status
-VirtualMachine             vm-cirros     default       true
-VirtualMachineInstance     vm-cirros     default       Running
+At the moment, integration with Docker is not perfect. When `docker-machine create -d harvester` is run, the docker-machine CLI will show errors, but the machine is correctly created, and setting the DOCKER_HOST, DOCKER_CERT environments variables manually get a working remote docker machine.
 
-```
+## Warning
+This repo is not yet well documented and not fully functional, it is designed to be a POC for the Node Driver feature for Harvester in Rancher.
