@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/url"
 
+	restclient "k8s.io/client-go/rest"
+
 	apiv1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -18,7 +20,6 @@ import (
 	"github.com/docker/machine/libmachine/mcnflag"
 	"github.com/docker/machine/libmachine/state"
 	regen "github.com/zach-klippenstein/goregen"
-	restclient "k8s.io/client-go/rest"
 	v1 "kubevirt.io/client-go/api/v1"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/containerized-data-importer/pkg/apis/core/v1alpha1"
@@ -75,21 +76,21 @@ const (
 type Driver struct {
 	*drivers.BaseDriver
 
-	vmLabels      map[string]string
-	vmName        string
-	vmDescription string
-	sshKeyName    string
-	vmImageID     string
-	diskSize      string
-	memSize       string
-	nbCPUCores    uint32
-	harvesterHost string
-	caCertBase64  string
-	certBase64    string
-	keyBase64     string
-	namespace     string
-	dockerPort    int
-	vm            *v1.VirtualMachine
+	VMLabels      map[string]string
+	VMName        string
+	VMDescription string
+	SSHKeyName    string
+	VMImageID     string
+	DiskSize      string
+	MemSize       string
+	NBCPUCores    uint32
+	HarvesterHost string
+	CACertBase64  string
+	CertBase64    string
+	KeyBase64     string
+	Namespace     string
+	DockerPort    int
+	VM            *v1.VirtualMachine
 }
 
 // NewDriver returns a new driver instance.
@@ -99,6 +100,10 @@ func NewDriver(hostName, storePath string) *Driver {
 	// making rest of the driver stateless by just relying on the following
 	// piece of info.
 	d := &Driver{
+		HarvesterHost: defaultHarvesterHost,
+		CACertBase64:  defaultCaCertBase64,
+		CertBase64:    defaultCertBase64,
+		KeyBase64:     defaultKeyBase64,
 		BaseDriver: &drivers.BaseDriver{
 			SSHUser:     defaultSSHUser,
 			MachineName: hostName,
@@ -216,16 +221,16 @@ func (d *Driver) SetConfigFromFlags(fl drivers.DriverOptions) error {
 		flag   string
 	}{
 		{&d.BaseDriver.SSHUser, flSSHUser},
-		{&d.vmName, flVMName},
-		{&d.vmDescription, flVMDescription},
-		{&d.sshKeyName, flSSHKeyName},
-		{&d.vmImageID, flVMImageID},
-		{&d.diskSize, flDiskSize},
-		{&d.memSize, flMemSize},
-		{&d.harvesterHost, flHarvesterHost},
-		{&d.caCertBase64, flCaCertBase64},
-		{&d.certBase64, flCertBase64},
-		{&d.keyBase64, flKeyBase64},
+		{&d.VMName, flVMName},
+		{&d.VMDescription, flVMDescription},
+		{&d.SSHKeyName, flSSHKeyName},
+		{&d.VMImageID, flVMImageID},
+		{&d.DiskSize, flDiskSize},
+		{&d.MemSize, flMemSize},
+		{&d.HarvesterHost, flHarvesterHost},
+		{&d.CACertBase64, flCaCertBase64},
+		{&d.CertBase64, flCertBase64},
+		{&d.KeyBase64, flKeyBase64},
 		{&d.SSHKeyPath, flSSHKeyPath},
 	}
 	for _, f := range flags {
@@ -236,12 +241,12 @@ func (d *Driver) SetConfigFromFlags(fl drivers.DriverOptions) error {
 	}
 
 	// Optional flags or Flags of other types
-	d.nbCPUCores = uint32(fl.Int(flNbCPUCores))
-	d.namespace = fl.String(flNamespace)
+	d.NBCPUCores = uint32(fl.Int(flNbCPUCores))
+	d.Namespace = fl.String(flNamespace)
 
 	// Set flags on the BaseDriver
 	d.BaseDriver.SSHPort = sshPort
-	d.vmLabels = map[string]string{
+	d.VMLabels = map[string]string{
 		"harvester.cattle.io/creator": "harvester",
 	}
 	d.SetSwarmConfigFromFlags(fl)
@@ -276,15 +281,15 @@ func (d *Driver) getHarvesterClient() (kubecli.KubevirtClient, error) {
 	// kubecli.DefaultClientConfig() prepares config using kubeconfig.
 	// typically, you need to set env variable, KUBECONFIG=<path-to-kubeconfig>/.kubeconfig
 	// clientConfig := kubecli.DefaultClientConfig(&pflag.FlagSet{})
-	caCertBytes, errCA := base64.StdEncoding.DecodeString(d.caCertBase64)
-	certBytes, errCert := base64.StdEncoding.DecodeString(d.certBase64)
-	keyBytes, errKey := base64.StdEncoding.DecodeString(d.keyBase64)
+	caCertBytes, errCA := base64.StdEncoding.DecodeString(d.CACertBase64)
+	certBytes, errCert := base64.StdEncoding.DecodeString(d.CertBase64)
+	keyBytes, errKey := base64.StdEncoding.DecodeString(d.KeyBase64)
 
 	if errCA != nil || errCert != nil || errKey != nil {
 		fmt.Println("An error happened during Base64 decoding of input certificate strings. The following error happened: %w", errCA)
 	}
 	clientConfig := restclient.Config{
-		Host: d.harvesterHost,
+		Host: d.HarvesterHost,
 		TLSClientConfig: restclient.TLSClientConfig{
 			ServerName: "harvester",
 			CAData:     caCertBytes,
@@ -303,9 +308,9 @@ func (d *Driver) Create() error {
 	sc := "longhorn"
 	dsAPIGroup := "storage.k8s.io"
 	diskRandomID := randomID()
-	pvcName := d.vmName + "-disk-0-" + diskRandomID
-	vmiLabels := d.vmLabels
-	vmiLabels["harvester.cattle.io/vmName"] = d.vmName
+	pvcName := d.VMName + "-disk-0-" + diskRandomID
+	vmiLabels := d.VMLabels
+	vmiLabels["harvester.cattle.io/vmName"] = d.VMName
 
 	// sshHost, _ := d.GetSSHHostname()
 	// d.vmLabels["SSHHost"] = sshHost
@@ -315,13 +320,13 @@ func (d *Driver) Create() error {
 	// var pvcDatasource apiv1.PersistentVolumeClaim
 	ubuntuVM := &v1.VirtualMachine{
 		ObjectMeta: k8smetav1.ObjectMeta{
-			Name:      d.vmName,
-			Namespace: d.namespace,
+			Name:      d.VMName,
+			Namespace: d.Namespace,
 			Annotations: map[string]string{
-				vmAnnotationDescription: d.vmDescription,
+				vmAnnotationDescription: d.VMDescription,
 				vmAnnotationNetworkIps:  "[]",
 			},
-			Labels: d.vmLabels,
+			Labels: d.VMLabels,
 		},
 		Spec: v1.VirtualMachineSpec{
 			Running: newTrue(),
@@ -330,13 +335,13 @@ func (d *Driver) Create() error {
 					ObjectMeta: k8smetav1.ObjectMeta{
 						Name: pvcName,
 						Annotations: map[string]string{
-							dvAnnotationImageID: d.namespace + "/" + d.vmImageID,
+							dvAnnotationImageID: d.Namespace + "/" + d.VMImageID,
 						},
 					},
 					Spec: v1alpha1.DataVolumeSpec{
 						Source: v1alpha1.DataVolumeSource{
 							HTTP: &v1alpha1.DataVolumeSourceHTTP{
-								URL: dvSourceHTTPURLPrefix + d.vmImageID,
+								URL: dvSourceHTTPURLPrefix + d.VMImageID,
 							},
 						},
 						PVC: &apiv1.PersistentVolumeClaimSpec{
@@ -345,7 +350,7 @@ func (d *Driver) Create() error {
 							},
 							Resources: apiv1.ResourceRequirements{
 								Requests: apiv1.ResourceList{
-									"storage": resource.MustParse(d.diskSize),
+									"storage": resource.MustParse(d.DiskSize),
 								},
 							},
 
@@ -360,11 +365,11 @@ func (d *Driver) Create() error {
 			},
 			Template: &v1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: k8smetav1.ObjectMeta{
-					Annotations: vmiAnnotations(pvcName, d.sshKeyName),
+					Annotations: vmiAnnotations(pvcName, d.SSHKeyName),
 					Labels:      vmiLabels,
 				},
 				Spec: v1.VirtualMachineInstanceSpec{
-					Hostname: d.vmName,
+					Hostname: d.VMName,
 					Networks: []v1.Network{
 						{
 							Name: "default",
@@ -393,9 +398,9 @@ func (d *Driver) Create() error {
 					},
 					Domain: v1.DomainSpec{
 						CPU: &v1.CPU{
-							Cores:   d.nbCPUCores,
-							Sockets: d.nbCPUCores,
-							Threads: d.nbCPUCores,
+							Cores:   d.NBCPUCores,
+							Sockets: d.NBCPUCores,
+							Threads: d.NBCPUCores,
 						},
 						Devices: v1.Devices{
 							Inputs: []v1.Input{
@@ -435,7 +440,7 @@ func (d *Driver) Create() error {
 						},
 						Resources: v1.ResourceRequirements{
 							Requests: apiv1.ResourceList{
-								"memory": resource.MustParse(d.memSize),
+								"memory": resource.MustParse(d.MemSize),
 							},
 						},
 					},
@@ -445,7 +450,7 @@ func (d *Driver) Create() error {
 	}
 
 	println("Creating Virtual Machine ...")
-	d.vm, err = virtClient.VirtualMachine(d.namespace).Create(ubuntuVM)
+	d.VM, err = virtClient.VirtualMachine(d.Namespace).Create(ubuntuVM)
 
 	if err != nil {
 		fmt.Println("Error! : ", err)
@@ -453,9 +458,9 @@ func (d *Driver) Create() error {
 
 	sshSvc := &apiv1.Service{
 		ObjectMeta: k8smetav1.ObjectMeta{
-			Name:      d.vmName,
-			Namespace: d.namespace,
-			Labels:    d.vm.Labels,
+			Name:      d.VMName,
+			Namespace: d.Namespace,
+			Labels:    d.VM.Labels,
 		},
 		Spec: apiv1.ServiceSpec{
 			Ports: []apiv1.ServicePort{
@@ -467,23 +472,23 @@ func (d *Driver) Create() error {
 					},
 				},
 			},
-			Selector: d.vmLabels,
+			Selector: d.VMLabels,
 			Type:     apiv1.ServiceTypeNodePort,
 		},
 	}
 
-	createdSvc, err := virtClient.Core().Services(d.namespace).Create(sshSvc)
+	createdSvc, err := virtClient.Core().Services(d.Namespace).Create(sshSvc)
 	// nodePort := createdSvc.Spec.Ports[0].NodePort
 	if len(createdSvc.Spec.Ports) != 0 {
 		d.SSHPort = int(createdSvc.Spec.Ports[0].NodePort)
 	}
 
-	dockerSvcName := fmt.Sprint(d.vmName, "-docker")
+	dockerSvcName := fmt.Sprint(d.VMName, "-docker")
 	dockerSvc := &apiv1.Service{
 		ObjectMeta: k8smetav1.ObjectMeta{
 			Name:      dockerSvcName,
-			Namespace: d.namespace,
-			Labels:    d.vm.Labels,
+			Namespace: d.Namespace,
+			Labels:    d.VM.Labels,
 		},
 		Spec: apiv1.ServiceSpec{
 			Ports: []apiv1.ServicePort{
@@ -496,15 +501,15 @@ func (d *Driver) Create() error {
 					NodePort: 32376,
 				},
 			},
-			Selector: d.vmLabels,
+			Selector: d.VMLabels,
 			Type:     apiv1.ServiceTypeNodePort,
 		},
 	}
 
-	dockerCreatedSvc, err := virtClient.Core().Services(d.namespace).Create(dockerSvc)
+	dockerCreatedSvc, err := virtClient.Core().Services(d.Namespace).Create(dockerSvc)
 	// nodePort := createdSvc.Spec.Ports[0].NodePort
 	if len(dockerCreatedSvc.Spec.Ports) != 0 {
-		d.dockerPort = int(dockerCreatedSvc.Spec.Ports[0].NodePort)
+		d.DockerPort = int(dockerCreatedSvc.Spec.Ports[0].NodePort)
 	}
 
 	if err != nil {
@@ -525,7 +530,7 @@ func (d *Driver) Remove() error {
 		return err
 	}
 
-	return c.VirtualMachine(d.namespace).Delete(d.vmName, &k8smetav1.DeleteOptions{})
+	return c.VirtualMachine(d.Namespace).Delete(d.VMName, &k8smetav1.DeleteOptions{})
 }
 
 func vmiAnnotations(pvcName string, sshKeyName string) map[string]string {
@@ -552,7 +557,7 @@ func (d *Driver) GetIP() (string, error) {
 		return "", err
 	}
 
-	vmi, err := c.VirtualMachineInstance(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+	vmi, err := c.VirtualMachineInstance(d.Namespace).Get(d.VMName, &k8smetav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -563,7 +568,7 @@ func (d *Driver) GetIP() (string, error) {
 // GetSSHHostname returns an IP address or hostname for the machine instance.
 func (d *Driver) GetSSHHostname() (string, error) {
 
-	podNetwork := d.vm.Spec.Template.Spec.Networks[0].Pod
+	podNetwork := d.VM.Spec.Template.Spec.Networks[0].Pod
 	if podNetwork != nil {
 		return d.GetHostIP()
 	}
@@ -575,9 +580,9 @@ func (d *Driver) GetSSHHostname() (string, error) {
 func (d *Driver) GetHostIP() (string, error) {
 
 	c, err := d.getHarvesterClient()
-	podSelector := fmt.Sprint("harvester.cattle.io/vmName=", d.vmLabels["harvester.cattle.io/vmName"])
+	podSelector := fmt.Sprint("harvester.cattle.io/vmName=", d.VMLabels["harvester.cattle.io/vmName"])
 	println("PodSelector to use: " + podSelector)
-	podList, err := c.Core().Pods(d.namespace).List(k8smetav1.ListOptions{
+	podList, err := c.Core().Pods(d.Namespace).List(k8smetav1.ListOptions{
 		LabelSelector: podSelector,
 	})
 
@@ -646,7 +651,7 @@ func (d *Driver) GetURL() (string, error) {
 	}
 	u := (&url.URL{
 		Scheme: "tcp",
-		Host:   net.JoinHostPort(ip, fmt.Sprintf("%d", d.dockerPort)),
+		Host:   net.JoinHostPort(ip, fmt.Sprintf("%d", d.DockerPort)),
 	}).String()
 	log.Debugf("Machine URL is resolved to: %s", u)
 	return u, nil
@@ -659,7 +664,7 @@ func (d *Driver) GetState() (state.State, error) {
 	if err != nil {
 		return state.None, err
 	}
-	vmi, err := c.VirtualMachineInstance(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+	vmi, err := c.VirtualMachineInstance(d.Namespace).Get(d.VMName, &k8smetav1.GetOptions{})
 	if err != nil {
 		return state.None, err
 	}
@@ -701,10 +706,10 @@ func (d *Driver) Start() error {
 		return err
 	}
 
-	vm, err := c.VirtualMachine(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+	vm, err := c.VirtualMachine(d.Namespace).Get(d.VMName, &k8smetav1.GetOptions{})
 	*vm.Spec.Running = true
 
-	_, err = c.VirtualMachine(d.namespace).Update(vm)
+	_, err = c.VirtualMachine(d.Namespace).Update(vm)
 	return err
 }
 
@@ -716,10 +721,10 @@ func (d *Driver) Stop() error {
 		return err
 	}
 
-	vm, err := c.VirtualMachine(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+	vm, err := c.VirtualMachine(d.Namespace).Get(d.VMName, &k8smetav1.GetOptions{})
 	*vm.Spec.Running = false
 
-	_, err = c.VirtualMachine(d.namespace).Update(vm)
+	_, err = c.VirtualMachine(d.Namespace).Update(vm)
 	return err
 }
 
@@ -741,11 +746,11 @@ func (d *Driver) Kill() error {
 		return err
 	}
 
-	vm, err := c.VirtualMachine(d.namespace).Get(d.vmName, &k8smetav1.GetOptions{})
+	vm, err := c.VirtualMachine(d.Namespace).Get(d.VMName, &k8smetav1.GetOptions{})
 	*vm.Spec.Running = false
 	*vm.Spec.Template.Spec.TerminationGracePeriodSeconds = 0
 
-	_, err = c.VirtualMachine(d.namespace).Update(vm)
+	_, err = c.VirtualMachine(d.Namespace).Update(vm)
 	return err
 }
 

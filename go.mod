@@ -10,6 +10,7 @@ require (
 	github.com/google/gxui v0.0.0-20151028112939-f85e0a97b3a4 // indirect
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/smartystreets/goconvey v1.6.4 // indirect
+	github.com/spf13/pflag v1.0.3
 	//github.com/rancher/machine v0.13.0
 	//github.com/spf13/pflag v1.0.3
 	github.com/zach-klippenstein/goregen v0.0.0-20160303162051-795b5e3961ea
