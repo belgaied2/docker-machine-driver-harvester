@@ -35,6 +35,7 @@ const (
 	defaultVMName        = "ubuntu-client-go-2"
 	defaultVMDescription = "Test request for Kubevirt"
 	defaultSSHKeyName    = "macos"
+	defaultSSHKeyPath    = "~/.ssh/MacOSsKey.pem"
 	defaultVMImageID     = "image-fjh7c"
 	defaultDiskSize      = "10Gi"
 	defaultMemSize       = "2Gi"
@@ -62,6 +63,7 @@ const (
 	flCertBase64    = "cert"
 	flKeyBase64     = "key"
 	flNamespace     = "namespace"
+	flSSHKeyPath    = "ssh-key-path"
 )
 
 const (
@@ -187,6 +189,12 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "HARVESTER_KEY",
 			Value:  defaultKeyBase64,
 		},
+		mcnflag.StringFlag{
+			Name:   flSSHKeyPath,
+			Usage:  "Path of the SSH Private Key to be used to connect to VMs",
+			EnvVar: "HARVESTER_SSH_KEY_PATH",
+			Value:  defaultSSHKeyPath,
+		},
 	}
 }
 
@@ -218,6 +226,7 @@ func (d *Driver) SetConfigFromFlags(fl drivers.DriverOptions) error {
 		{&d.caCertBase64, flCaCertBase64},
 		{&d.certBase64, flCertBase64},
 		{&d.keyBase64, flKeyBase64},
+		{&d.SSHKeyPath, flSSHKeyPath},
 	}
 	for _, f := range flags {
 		*f.target = fl.String(f.flag)
@@ -438,6 +447,10 @@ func (d *Driver) Create() error {
 	println("Creating Virtual Machine ...")
 	d.vm, err = virtClient.VirtualMachine(d.namespace).Create(ubuntuVM)
 
+	if err != nil {
+		fmt.Println("Error! : ", err)
+	}
+
 	sshSvc := &apiv1.Service{
 		ObjectMeta: k8smetav1.ObjectMeta{
 			Name:      d.vmName,
@@ -550,7 +563,7 @@ func (d *Driver) GetIP() (string, error) {
 // GetSSHHostname returns an IP address or hostname for the machine instance.
 func (d *Driver) GetSSHHostname() (string, error) {
 
-	podNetwork := *&d.vm.Spec.Template.Spec.Networks[0].Pod
+	podNetwork := d.vm.Spec.Template.Spec.Networks[0].Pod
 	if podNetwork != nil {
 		return d.GetHostIP()
 	}
@@ -592,7 +605,11 @@ func (d *Driver) GetSSHPort() (int, error) {
 
 // GetSSHKeyPath return the SSH Key Path
 func (d *Driver) GetSSHKeyPath() string {
-	return "/home/mohamed/.ssh/MacOSsKey.pem"
+
+	if d.SSHKeyPath != "" {
+		return d.SSHKeyPath
+	}
+	return ""
 }
 
 // ErrHostIsNotRunning is an error that shows that the VM is not Running
