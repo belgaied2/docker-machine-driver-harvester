@@ -86,6 +86,7 @@ type Driver struct {
 	certBase64    string
 	keyBase64     string
 	namespace     string
+	dockerPort    int
 	vm            *v1.VirtualMachine
 }
 
@@ -297,6 +298,9 @@ func (d *Driver) Create() error {
 	vmiLabels := d.vmLabels
 	vmiLabels["harvester.cattle.io/vmName"] = d.vmName
 
+	// sshHost, _ := d.GetSSHHostname()
+	// d.vmLabels["SSHHost"] = sshHost
+
 	virtClient, err := d.getHarvesterClient()
 
 	// var pvcDatasource apiv1.PersistentVolumeClaim
@@ -461,11 +465,34 @@ func (d *Driver) Create() error {
 		d.SSHPort = int(createdSvc.Spec.Ports[0].NodePort)
 	}
 
-	sshHost, _ := d.GetSSHHostname()
-	sshPort, _ := d.GetSSHPort()
+	dockerSvcName := fmt.Sprint(d.vmName, "-docker")
+	dockerSvc := &apiv1.Service{
+		ObjectMeta: k8smetav1.ObjectMeta{
+			Name:      dockerSvcName,
+			Namespace: d.namespace,
+			Labels:    d.vm.Labels,
+		},
+		Spec: apiv1.ServiceSpec{
+			Ports: []apiv1.ServicePort{
+				{
+					Name: "docker",
+					Port: 32376,
+					TargetPort: intstr.IntOrString{
+						IntVal: 32376,
+					},
+					NodePort: 32376,
+				},
+			},
+			Selector: d.vmLabels,
+			Type:     apiv1.ServiceTypeNodePort,
+		},
+	}
 
-	println("SSH Host: ", sshHost)
-	println("SSH Port:", sshPort)
+	dockerCreatedSvc, err := virtClient.Core().Services(d.namespace).Create(dockerSvc)
+	// nodePort := createdSvc.Spec.Ports[0].NodePort
+	if len(dockerCreatedSvc.Spec.Ports) != 0 {
+		d.dockerPort = int(dockerCreatedSvc.Spec.Ports[0].NodePort)
+	}
 
 	if err != nil {
 		println(err.Error())
@@ -565,7 +592,7 @@ func (d *Driver) GetSSHPort() (int, error) {
 
 // GetSSHKeyPath return the SSH Key Path
 func (d *Driver) GetSSHKeyPath() string {
-	return "~/.ssh/MacOSsKey.pem"
+	return "/home/mohamed/.ssh/MacOSsKey.pem"
 }
 
 // ErrHostIsNotRunning is an error that shows that the VM is not Running
@@ -596,13 +623,13 @@ func (d *Driver) GetURL() (string, error) {
 	// NOTE (ahmetalpbalkan) I noticed that this is not used until machine is
 	// actually created and provisioned. By then GetIP() should be returning
 	// a non-empty IP address as the VM is already allocated and connected to.
-	ip, err := d.GetIP()
+	ip, err := d.GetHostIP()
 	if err != nil {
 		return "", err
 	}
 	u := (&url.URL{
 		Scheme: "tcp",
-		Host:   net.JoinHostPort(ip, fmt.Sprintf("%d", 2376)),
+		Host:   net.JoinHostPort(ip, fmt.Sprintf("%d", d.dockerPort)),
 	}).String()
 	log.Debugf("Machine URL is resolved to: %s", u)
 	return u, nil

@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	plugin.RegisterDriver(harvester.NewDriver("", ""))
+	plugin.RegisterDriver(harvester.NewDriver("machine", ""))
 
 }
 
