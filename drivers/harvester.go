@@ -529,8 +529,30 @@ func (d *Driver) Remove() error {
 	if err != nil {
 		return err
 	}
+	// Delete VM Object
+	err = c.VirtualMachine(d.Namespace).Delete(d.VMName, &k8smetav1.DeleteOptions{})
+	if err != nil {
+		return err
+	}
 
-	return c.VirtualMachine(d.Namespace).Delete(d.VMName, &k8smetav1.DeleteOptions{})
+	// Get List of Services create for VM
+	svcList, err := c.Core().Services(d.Namespace).List(k8smetav1.ListOptions{
+		LabelSelector: "harvester.cattle.io/vmName=ubuntu-client-go-1",
+	})
+
+	if err != nil {
+		return err
+	}
+
+	// Iterate through Services created for VM and Delete them
+	for _, svc := range svcList.Items {
+
+		err := c.Core().Services(d.Namespace).Delete(svc.Name, &k8smetav1.DeleteOptions{})
+		if err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 func vmiAnnotations(pvcName string, sshKeyName string) map[string]string {
